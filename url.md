@@ -1,133 +1,175 @@
-This document is heavily inspired by the following tutorial:
-https://www.swiftbysundell.com/articles/constructing-urls-in-swift/
+# Constructing URLs in Swift
 
-I'm using their examples and rewriting explanations for myself to reference and improve my understanding.
+> This document is heavily inspired by the following tutorial:
+> [swiftbysundell.com/articles/constructing-urls-in-swift](https://www.swiftbysundell.com/articles/constructing-urls-in-swift/)
+>
+> I'm using their examples and rewriting explanations for myself to reference and improve my understanding.
 
-URLs are strings under the hood. They do have a lot more limitations than strings because they have a well-defined format that they must conform to. Because they're strings, you can just use string concatenation to use them but that's generally inefficient and gets unreadable. 
+---
 
-EXTERNAL URL EXAMPLE:
+## Overview
 
-  // Concatenation example (ew)
-  func findRepositories(matching query: String) {
-      let api = "https://api.github.com"
-      let endpoint = "/search/repositories?q=\(query)"
-      let url = URL(string: api + endpoint)
-      ...
-  }
-  
-  A cleaner but slightly more complex way of doing this is via URLComponents(). There's a bit more code, but it improves the utility of the resulting URLs by allowing you to do a lot more with them while the system handles the complexity behind putting the URL together and the syntax involved.
-  
-  // Using URLComponents
-  func findRepositories(matching query: String,
-                        sortedBy sorting: Sorting) {
-      var components = URLComponents()
-      components.scheme = "https"
-      components.host = "api.github.com"
-      components.path = "/search/repositories"
-      components.queryItems = [
-          URLQueryItem(name: "q", value: query),
-          URLQueryItem(name: "sort", value: sorting.rawValue)
-      ]
-  
-      // Getting a URL from our components is as simple as
-      // accessing the 'url' property.
-      let url = components.url
-      ...
-  }
-  
-Both options are viable, but URLComponents is preferred.
+URLs are strings under the hood. They do have a lot more limitations than strings because they have a well-defined format that they must conform to. Because they're strings, you can just use string concatenation to use them — but that's generally inefficient and gets unreadable.
 
-What if we want to avoid writing all that URLComponents() code for multiple endpoints? EXTENSIONS :D
+---
 
-To start, we make a struct to represent an endpoint:
+## External URL Example
 
-  struct Endpoint {
-      let path: String
-      let queryItems: [URLQueryItem]
-  }
+### ❌ String Concatenation
 
-You can either use this struct by passing a path and queryItems into it every time, or create an extension to Endpoint that handles common queries so you don't have to do that every time:
+Works, but fragile and hard to read:
 
-  extension Endpoint {
-      static func search(matching query: String,
-                         sortedBy sorting: Sorting = .recency) -> Endpoint {
-          return Endpoint(
-              path: "/search/repositories",
-              queryItems: [
-                  URLQueryItem(name: "q", value: query),
-                  URLQueryItem(name: "sort", value: sorting.rawValue)
-              ]
-          )
-      }
-  }
-  
-The URLQueryItem struct is used to represent a query key-value parameter in the URL. Just a way to avoid fragile string interpolation. 
+```swift
+func findRepositories(matching query: String) {
+    let api = "https://api.github.com"
+    let endpoint = "/search/repositories?q=\(query)"
+    let url = URL(string: api + endpoint)
+    ...
+}
+```
 
-Finally, the following extension to Endpoint handles the actual creation of the URL given path and queryItems. This works with the common endpoint method above and for single cases.
+### ✅ URLComponents
 
-  extension Endpoint {
-      // We still have to keep 'url' as an optional, since we're
-      // dealing with dynamic components that could be invalid.
-      var url: URL? {
-          var components = URLComponents()
-          components.scheme = "https"
-          components.host = "api.github.com"
-          components.path = path
-          components.queryItems = queryItems
-  
-          return components.url
-      }
-  }
+A cleaner but slightly more complex approach. There's a bit more code, but it improves the utility of the resulting URLs by allowing you to do a lot more with them while the system handles the complexity of putting the URL together and the syntax involved:
 
-Putting it all together for a DataLoader type that takes an endpoint and loads its data:
+```swift
+func findRepositories(matching query: String,
+                      sortedBy sorting: Sorting) {
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = "api.github.com"
+    components.path = "/search/repositories"
+    components.queryItems = [
+        URLQueryItem(name: "q", value: query),
+        URLQueryItem(name: "sort", value: sorting.rawValue)
+    ]
 
-  class DataLoader {
-      func request(_ endpoint: Endpoint,
-                  then handler: @escaping (Result<Data>) -> Void) {
-          guard let url = endpoint.url else {
-              return handler(.failure(Error.invalidURL))
-          }
-  
-          let task = urlSession.dataTask(with: url) {
-              data, _, error in
-  
-              let result = data.map(Result.success) ??
-                          .failure(Error.network(error))
-  
-              handler(result)
-          }
-  
-          task.resume()
-      }
-  }
+    // Getting a URL from our components is as simple as
+    // accessing the 'url' property.
+    let url = components.url
+    ...
+}
+```
 
-With everything else in place, you can load the data you want in a single request:
+> Both options are viable, but `URLComponents` is preferred.
 
-  dataLoader.request(.search(matching: query)) { result in
-      ...
-  }
+The `URLQueryItem` struct represents a query key-value parameter in the URL — just a way to avoid fragile string interpolation.
 
-  // .search(matching: query): Swift infers the type from the method signature, so you don't have to do Endpoint.search. The query itself is defined elsewhere, which in this case would be a repository name. 
-  
-LOCAL/STATIC URL EXAMPLE:
+---
 
-With dynamic URLs, conditionals have to be used because there's no guarantee all URL components are valid. With static URLs, either you typed it right or you didn't, so you can avoid most of that using the StaticString type. StaticStrings can't be the result of any dynamic expression, so the whole string needs to be defined as an inline literal.
+## Avoiding Repetition with Extensions
 
-Note: I personally don't see why this guide forces the StaticString type when a string would do just fine. Gonna have to ask the mentor or he'll see when he reads this. 
+What if we want to avoid writing all that `URLComponents()` code for multiple endpoints? **Extensions** to the rescue.
 
-Given that information, you can make a URL initializer for any static URL with ease:
+### Step 1 — Define an Endpoint Struct
 
-  extension URL {
-      init(staticString string: StaticString) {
-          guard let url = URL(string: "\(string)") else {
-              preconditionFailure("Invalid static URL string: \(string)")
-          }
-  
-          self = url
-      }
-  }
-  
+```swift
+struct Endpoint {
+    let path: String
+    let queryItems: [URLQueryItem]
+}
+```
+
+### Step 2 — Add Common Endpoints via Extension
+
+You can either use the struct by passing a path and `queryItems` into it every time, or create an extension to `Endpoint` that handles common queries so you don't have to:
+
+```swift
+extension Endpoint {
+    static func search(matching query: String,
+                       sortedBy sorting: Sorting = .recency) -> Endpoint {
+        return Endpoint(
+            path: "/search/repositories",
+            queryItems: [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "sort", value: sorting.rawValue)
+            ]
+        )
+    }
+}
+```
+
+### Step 3 — Add URL Construction via Extension
+
+This extension handles the actual creation of the URL given `path` and `queryItems`. It works with the common endpoint method above and for single cases:
+
+```swift
+extension Endpoint {
+    // We still have to keep 'url' as an optional, since we're
+    // dealing with dynamic components that could be invalid.
+    var url: URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "api.github.com"
+        components.path = path
+        components.queryItems = queryItems
+
+        return components.url
+    }
+}
+```
+
+### Step 4 — Put It All Together with DataLoader
+
+A `DataLoader` type that takes an endpoint and loads its data:
+
+```swift
+class DataLoader {
+    func request(_ endpoint: Endpoint,
+                then handler: @escaping (Result<Data>) -> Void) {
+        guard let url = endpoint.url else {
+            return handler(.failure(Error.invalidURL))
+        }
+
+        let task = urlSession.dataTask(with: url) {
+            data, _, error in
+
+            let result = data.map(Result.success) ??
+                        .failure(Error.network(error))
+
+            handler(result)
+        }
+
+        task.resume()
+    }
+}
+```
+
+With everything in place, you can load the data you want in a single request:
+
+```swift
+dataLoader.request(.search(matching: query)) { result in
+    ...
+}
+```
+
+> **Note:** Swift infers the `Endpoint` type from the method signature, so you don't have to write `Endpoint.search(...)`. The `query` itself is defined elsewhere — in this case it would be a repository name.
+
+---
+
+## Local / Static URL Example
+
+With dynamic URLs, conditionals have to be used because there's no guarantee all URL components are valid. With static URLs, either you typed it right or you didn't — so you can avoid most of that using the `StaticString` type. `StaticString`s can't be the result of any dynamic expression, so the whole string needs to be defined as an inline literal.
+
+> **Personal note:** I don't see why this guide forces the `StaticString` type when a plain `String` would do just fine. Gonna have to ask the mentor, or he'll see when he reads this.
+
+Given that information, you can make a `URL` initializer for any static URL with ease:
+
+```swift
+extension URL {
+    init(staticString string: StaticString) {
+        guard let url = URL(string: "\(string)") else {
+            preconditionFailure("Invalid static URL string: \(string)")
+        }
+
+        self = url
+    }
+}
+```
+
 Used as:
 
-  let url = URL(staticString: "https://myapp.com/faq.html")
-  // light work
+```swift
+let url = URL(staticString: "https://myapp.com/faq.html")
+// light work
+```
