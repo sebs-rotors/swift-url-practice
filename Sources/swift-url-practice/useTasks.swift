@@ -14,5 +14,8 @@ struct App {
         }
 
         router.handle("sebisidor://Code")
+
+        let data = "/some/path/file.txt".asFile
+        print(data)
     }
 }

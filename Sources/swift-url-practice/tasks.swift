@@ -45,3 +45,9 @@ class URLRouter {
         handler(url)
     }
 }
+
+extension String {
+    var asFile: URL {
+        return URL(fileURLWithPath: self)
+    }
+}
